@@ -12,4 +12,5 @@ build.sh
 
 ```
 ./app --url=https://www.vangoghmuseum.nl/en/search/collection\?artist\=Vincent%20van%20Gogh
+./app --login=true --url=https://www.pixiv.net/member.php?id=341433
 ```

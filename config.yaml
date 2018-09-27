@@ -1,2 +1,7 @@
 app:
-  test: 1
+  root: 1
+
+www.pixiv.net:
+  id: test
+  password: test
+  root-dir: /home/test/pixiv

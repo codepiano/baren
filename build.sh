@@ -2,10 +2,11 @@
 
 set -xe
 
-for plugin in `find src/plugins -name "*.go"`;
+for plugin in `find plugins_src -name "*.go"`;
 do
     plugin_file="${plugin##*/}"
     plugin_path="${plugin%/*}"
+    plugin_path="${plugin_path#*/}"
     plugin_name="${plugin_file%%.*}"
-    go build -buildmode plugin -o "${plugin_path#src/}/$plugin_name.so" "$plugin"
+    go build -buildmode plugin -o "plugins/${plugin_path}/$plugin_name.so" "$plugin"
 done
