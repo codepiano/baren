@@ -37,6 +37,7 @@ func initFlags() {
 	pflag.String("url", "", "web page url")
 	pflag.Bool("login", false, "need login?")
 	pflag.Bool("force", false, "force process all image")
+	pflag.Int("limit", 1000000, "limit max download")
 	pflag.Parse()
 	viper.BindPFlags(pflag.CommandLine)
 }
@@ -159,13 +160,18 @@ func baren(url string, isLogin bool) {
 	signalChannel := make(chan string, 10)
 	go plugin.Baren(url, loadUrl, resultChannel, signalChannel)
 	force := viper.GetBool("force")
+	limit := viper.GetInt("limit")
 	for value := range resultChannel {
 		rootDir := config["root-dir"] + "/" + value.Dir + "/"
 		status := download(value.Request, rootDir, value.FileName)
 		// 下载完毕
-		if status == 1 {
+		if status > 1 {
 			picInfo := fmt.Sprintf("%s, %s", value.String(), time.Now().Format("2006-01-02 15:04:05"))
 			appendToFile(rootDir+"/result.txt", []byte(picInfo))
+			if status >= limit {
+				signalChannel <- "stop"
+				break
+			}
 		} else if !force {
 			signalChannel <- "stop"
 			break
