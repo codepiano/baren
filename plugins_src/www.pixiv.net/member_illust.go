@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -23,15 +24,17 @@ import (
 const Domain = "https://www.pixiv.net"
 const PaintingPage = "https://www.pixiv.net/member_illust.php"
 
-type plugin struct {
+type craw struct {
 	Client   *http.Client
 	Total    int
+	base     string
 	RootDir  string
 	BeginURL *url.URL
+	Limit    int
 }
 
-func InitPlugin() (f interface{}, err error) {
-	f = plugin{}
+func InitCraw() (f interface{}, err error) {
+	f = craw{}
 	return
 }
 
@@ -153,12 +156,13 @@ func getPaintingInfo(picInfoUrl string, loader func(string) io.ReadCloser, rootD
 	return requests, nil
 }
 
-func (p plugin) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
 	// 下载当前页的图片
 	for i, picUrl := range allPicPageUrls {
 		select {
 		case signal := <-s:
 			log.Infof("recieve stop signal, quit, signal: %e", signal)
+			close(c)
 			return
 		default:
 			paintingInfo, err := getPaintingInfo(picUrl, loader, p.RootDir)
@@ -173,24 +177,29 @@ func (p plugin) ProcessPage(allPicPageUrls []string, loader func(string) io.Read
 		}
 	}
 	close(c)
-	close(s)
 }
 
 // 下载单张
-func (p plugin) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p craw) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
 	html := getHtmlSourceCode(p.BeginURL.String(), loader)
 	// 获取作者
 	author := regexpFirstMatchGroup("<title>「[^」]+」/「([^」]+)」", html)
 	authorId := regexpFirstMatchGroup(`"authorId":"(\d+)"`, html)
 	p.Total = 1
-	p.RootDir = authorId + "-" + author
+	// 拼接目录名
+	existDir := p.processAuthorRename(authorId)
+	if existDir == "" {
+		p.RootDir = authorId + "-" + author
+	} else {
+		p.RootDir = existDir
+	}
 	allPicPageUrls := make([]string, 0)
 	allPicPageUrls = append(allPicPageUrls, beginUrl)
 	p.ProcessPage(allPicPageUrls, loader, c, s)
 }
 
 // 下载全部
-func (p plugin) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p craw) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
 	html := getHtmlSourceCode(beginUrl, loader)
 	// 获取作者
 	author := regexpFirstMatchGroup("<title>「([^」]+)」的作品", html)
@@ -224,10 +233,18 @@ func (p plugin) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c c
 	sort.Sort(sort.Reverse(sort.IntSlice(picNumberIds)))
 	// 总数
 	p.Total = len(picNumberIds)
-	log.Infof("total pic %s", p.Total)
+	log.Infof("total pic %s, limit %s", p.Total, p.Limit)
+	if p.Total > p.Limit {
+		picNumberIds = picNumberIds[:p.Limit]
+	}
 	allPicPageUrls := make([]string, 0)
 	// 拼接目录名
-	p.RootDir = authorId + "-" + author
+	existDir := p.processAuthorRename(authorId)
+	if existDir == "" {
+		p.RootDir = authorId + "-" + author
+	} else {
+		p.RootDir = existDir
+	}
 	for _, value := range picNumberIds {
 		picUrl := "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=" + strconv.Itoa(value)
 		allPicPageUrls = append(allPicPageUrls, picUrl)
@@ -235,13 +252,29 @@ func (p plugin) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c c
 	p.ProcessPage(allPicPageUrls, loader, c, s)
 }
 
-func (p plugin) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p craw) processAuthorRename(id string) string {
+	m, _ := filepath.Glob(p.base + "/" + id + "-*")
+	if len(m) > 1 {
+		log.Panicf("id %s match many dir!, may be duplicate!", id)
+	} else if len(m) == 1 {
+		log.Infof("id: %s dir already exist use this")
+		return utils.RemoveStartToRightMost(m[0], '/')
+	} else {
+		log.Infof("first time download id: %s")
+		return ""
+	}
+	return ""
+}
+
+func (p craw) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, base string) {
 	// 判断是不是单张图片
 	u, err := url.Parse(beginUrl)
 	if err != nil {
 		log.Panicf("parse %s error", beginUrl, err)
 	}
 	p.BeginURL = u
+	p.Limit = limit
+	p.base = base
 	m, _ := url.ParseQuery(u.RawQuery)
 	if m.Get("mode") == "medium" && m.Get("illust_id") != "" {
 		log.Infof("fetch single", beginUrl)

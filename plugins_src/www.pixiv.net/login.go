@@ -19,7 +19,7 @@ const LoginApi = "https://accounts.pixiv.net/api/login?lang=zh"
 
 type login struct{}
 
-func InitPlugin() (f interface{}, err error) {
+func InitCraw() (f interface{}, err error) {
 	f = login{}
 	return
 }

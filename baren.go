@@ -22,6 +22,7 @@ import (
 var Client *http.Client
 var downloadCount = 0
 var actualDownloadCount = 0
+var craw omohan.Plugin
 
 func initConfig() {
 	viper.SetConfigType("yaml")
@@ -87,11 +88,11 @@ func loadPlugin(domain string, path string) interface{} {
 		log.Panicf("could not load %s.so under ./plugins/%s, error: %v", path, domain, err)
 	}
 
-	initPlugin, err := p.Lookup("InitPlugin")
+	InitCraw, err := p.Lookup("InitCraw")
 	if err != nil {
-		log.Panicf("plugin must have function InitPlugin: %v", err)
+		log.Panicf("plugin must have function InitCraw: %v", err)
 	}
-	plugin, err := initPlugin.(func() (interface{}, error))()
+	plugin, err := InitCraw.(func() (interface{}, error))()
 	if err != nil {
 		log.Panicf("init plugin error: %v", err)
 	}
@@ -101,12 +102,9 @@ func loadPlugin(domain string, path string) interface{} {
 func download(request *http.Request, path string, fileName string) int {
 	downloadCount = downloadCount + 1
 	url := request.URL.String()
-	// 判断目录是否存在
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		err := os.MkdirAll(path, 0755)
-		if err != nil {
-			log.Panicf("create dir failed, dir: %s, %v", path, err)
-		}
+	err := utils.MkdirIfNotExist(path, 0755)
+	if err != nil {
+		log.Panicf("mkdir error! %s", path)
 	}
 	filePath := path + "/" + fileName
 	if file, err := os.Stat(filePath); err == nil && file.Size() != 0 {
@@ -131,7 +129,7 @@ func download(request *http.Request, path string, fileName string) int {
 		log.Panicf("write to file failed, path: %s, %v", path, err)
 	}
 	log.Infof("[%d/%d] file %s download success, save to %s", actualDownloadCount, downloadCount, url, filePath)
-	return 1
+	return actualDownloadCount
 }
 
 func baren(url string, isLogin bool) {
@@ -155,12 +153,13 @@ func baren(url string, isLogin bool) {
 		config = viper.GetStringMapString(domain)
 		login.Login(Client, config)
 	}
-	plugin := loadPlugin(domain, path).(omohan.Plugin)
+	craw = loadPlugin(domain, path).(omohan.Plugin)
 	resultChannel := make(chan *omohan.Info, 100)
 	signalChannel := make(chan string, 10)
-	go plugin.Baren(url, loadUrl, resultChannel, signalChannel)
-	force := viper.GetBool("force")
+	defer close(signalChannel)
 	limit := viper.GetInt("limit")
+	go craw.Baren(url, loadUrl, resultChannel, signalChannel, limit, config["root-dir"])
+	force := viper.GetBool("force")
 	for value := range resultChannel {
 		rootDir := config["root-dir"] + "/" + value.Dir + "/"
 		status := download(value.Request, rootDir, value.FileName)
@@ -168,15 +167,12 @@ func baren(url string, isLogin bool) {
 		if status > 1 {
 			picInfo := fmt.Sprintf("%s, %s", value.String(), time.Now().Format("2006-01-02 15:04:05"))
 			appendToFile(rootDir+"/result.txt", []byte(picInfo))
-			if status >= limit {
-				signalChannel <- "stop"
-				break
-			}
-		} else if !force {
+		} else if !force && status < 1 {
 			signalChannel <- "stop"
 			break
 		}
 	}
+	signalChannel <- "stop"
 }
 
 func main() {

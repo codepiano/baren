@@ -5,5 +5,5 @@ import (
 )
 
 type Plugin interface {
-	Baren(string, func(string) io.ReadCloser, chan *Info, chan string)
+	Baren(string, func(string) io.ReadCloser, chan *Info, chan string, int, string)
 }

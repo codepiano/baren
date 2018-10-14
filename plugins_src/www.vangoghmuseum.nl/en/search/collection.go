@@ -20,7 +20,7 @@ type plugin struct {
 	Client *http.Client
 }
 
-func InitPlugin() (f interface{}, err error) {
+func InitCraw() (f interface{}, err error) {
 	f = plugin{}
 	return
 }
@@ -94,7 +94,7 @@ func getPaintingInfo(doc *goquery.Document) (*omohan.Info, error) {
 	}, nil
 }
 
-func (plugin) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (plugin) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, root string) {
 	// 获取页面源码
 	pageSource := loader(beginUrl)
 	defer pageSource.Close()
