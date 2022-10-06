@@ -17,14 +17,9 @@ const Domain = "https://www.pixiv.net/"
 const LoginPage = "https://accounts.pixiv.net/login?lang=zh&source=pc&view_type=page&ref=wwwtop_accounts_index"
 const LoginApi = "https://accounts.pixiv.net/api/login?lang=zh"
 
-type login struct{}
+type Login struct{}
 
-func InitCraw() (f interface{}, err error) {
-	f = login{}
-	return
-}
-
-func (login) Login(client *http.Client, config map[string]string) {
+func (l Login) Login(client *http.Client, config map[string]string) {
 	// 从登录页面获取 post_key 和 PHPSESSID cookie
 	loginResp, err := client.Get(LoginPage)
 	if err != nil {

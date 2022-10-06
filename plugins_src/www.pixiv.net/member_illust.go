@@ -21,10 +21,7 @@ import (
 	"time"
 )
 
-const Domain = "https://www.pixiv.net"
-const PaintingPage = "https://www.pixiv.net/member_illust.php"
-
-type craw struct {
+type Craw struct {
 	Client   *http.Client
 	Total    int
 	base     string
@@ -33,9 +30,14 @@ type craw struct {
 	Limit    int
 }
 
-func InitCraw() (f interface{}, err error) {
-	f = craw{}
-	return
+func (p *Craw) InitCraw(client *http.Client) (interface{}, error) {
+	if p == nil {
+		return Craw{
+			Client: client,
+		}, nil
+	} else {
+		return p, nil
+	}
 }
 
 // 正则表达式匹配，返回第一个 group
@@ -156,7 +158,7 @@ func getPaintingInfo(picInfoUrl string, loader func(string) io.ReadCloser, rootD
 	return requests, nil
 }
 
-func (p craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p *Craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
 	// 下载当前页的图片
 	for i, picUrl := range allPicPageUrls {
 		select {
@@ -180,7 +182,7 @@ func (p craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadCl
 }
 
 // 下载单张
-func (p craw) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p *Craw) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
 	html := getHtmlSourceCode(p.BeginURL.String(), loader)
 	// 获取作者
 	author := regexpFirstMatchGroup("<title>「[^」]+」/「([^」]+)」", html)
@@ -199,7 +201,7 @@ func (p craw) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c 
 }
 
 // 下载全部
-func (p craw) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p *Craw) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
 	html := getHtmlSourceCode(beginUrl, loader)
 	// 获取作者
 	author := regexpFirstMatchGroup("<title>「([^」]+)」的作品", html)
@@ -252,7 +254,7 @@ func (p craw) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c cha
 	p.ProcessPage(allPicPageUrls, loader, c, s)
 }
 
-func (p craw) processAuthorRename(id string) string {
+func (p *Craw) processAuthorRename(id string) string {
 	m, _ := filepath.Glob(p.base + "/" + id + "-*")
 	if len(m) > 1 {
 		log.Panicf("id %s match many dir!, may be duplicate!", id)
@@ -266,7 +268,7 @@ func (p craw) processAuthorRename(id string) string {
 	return ""
 }
 
-func (p craw) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, base string) {
+func (p *Craw) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, base string) {
 	// 判断是不是单张图片
 	u, err := url.Parse(beginUrl)
 	if err != nil {

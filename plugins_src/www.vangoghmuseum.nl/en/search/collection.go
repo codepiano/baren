@@ -16,13 +16,18 @@ import (
 
 const Domain = "https://www.vangoghmuseum.nl"
 
-type plugin struct {
+type Craw struct {
 	Client *http.Client
 }
 
-func InitCraw() (f interface{}, err error) {
-	f = plugin{}
-	return
+func (p *Craw) InitCraw(client *http.Client) (interface{}, error) {
+	if p == nil {
+		return &Craw{
+			Client: client,
+		}, nil
+	} else {
+		return p, nil
+	}
 }
 
 func formatDate(original string) string {
@@ -94,7 +99,7 @@ func getPaintingInfo(doc *goquery.Document) (*omohan.Info, error) {
 	}, nil
 }
 
-func (plugin) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, root string) {
+func (p *Craw) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, root string) {
 	// 获取页面源码
 	pageSource := loader(beginUrl)
 	defer pageSource.Close()
