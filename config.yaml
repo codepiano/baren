@@ -1,5 +1,6 @@
 app:
   root: 1
+  root-dir: /Users/codepiano/baren
 
 www.pixiv.net:
   id: test

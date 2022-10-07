@@ -5,12 +5,12 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+
 	//	"github.com/PuerkitoBio/goquery"
 	"github.com/codepiano/baren/omohan"
 	"github.com/codepiano/baren/utils"
 	log "github.com/sirupsen/logrus"
-	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -30,9 +30,9 @@ type Craw struct {
 	Limit    int
 }
 
-func (p *Craw) InitCraw(client *http.Client) (interface{}, error) {
+func (p *Craw) InitCraw(client *http.Client) (omohan.Plugin, error) {
 	if p == nil {
-		return Craw{
+		return &Craw{
 			Client: client,
 		}, nil
 	} else {
@@ -61,20 +61,12 @@ func formatDate(original string) string {
 	return t.Format("20060102.1504")
 }
 
-func getHtmlSourceCode(url string, loader func(string) io.ReadCloser) string {
-	// 获取页面源码
-	pageSource := loader(url)
-	defer pageSource.Close()
-	html, err := utils.StreamToString(pageSource)
-	if err != nil {
-		log.Panicf("get %s html source error", url, err)
-	}
-	return html
-}
-
 // 获取图片信息
-func getPaintingInfo(picInfoUrl string, loader func(string) io.ReadCloser, rootDir string) ([]*omohan.Info, error) {
-	html := getHtmlSourceCode(picInfoUrl, loader)
+func (p *Craw) getPaintingInfo(picInfoUrl string, rootDir string) ([]*omohan.Info, error) {
+	html, err := utils.GetUrlContent(p.Client, picInfoUrl)
+	if err != nil {
+		log.Panic(err)
+	}
 	// 获取图片数量
 	paintingCountRex := regexp.MustCompile(`"pageCount":(\d+),"bookmarkCount"`)
 	paintingCountMatch := paintingCountRex.FindStringSubmatch(html)
@@ -90,7 +82,10 @@ func getPaintingInfo(picInfoUrl string, loader func(string) io.ReadCloser, rootD
 	var urls []string
 	if pageCount > 1 {
 		multiPicUrl := strings.Replace(picInfoUrl, "medium", "manga", -1)
-		multiPicInfoPage := loader(multiPicUrl)
+		multiPicInfoPage, err := utils.GetUrlStream(p.Client, multiPicUrl)
+		if err != nil {
+			log.Panic(err)
+		}
 		defer multiPicInfoPage.Close()
 		multiPicPageHtml, err := utils.StreamToString(multiPicInfoPage)
 		if err != nil {
@@ -143,7 +138,7 @@ func getPaintingInfo(picInfoUrl string, loader func(string) io.ReadCloser, rootD
 			log.Panicf("parse largePicUrl %s error: %s", largePicUrl, err)
 		}
 		request := &http.Request{
-			Method: "GET",
+			Method: http.MethodGet,
 			URL:    largePic,
 			Header: header,
 		}
@@ -158,7 +153,7 @@ func getPaintingInfo(picInfoUrl string, loader func(string) io.ReadCloser, rootD
 	return requests, nil
 }
 
-func (p *Craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
+func (p *Craw) ProcessPage(allPicPageUrls []string, c chan *omohan.Info, s chan string) {
 	// 下载当前页的图片
 	for i, picUrl := range allPicPageUrls {
 		select {
@@ -167,7 +162,7 @@ func (p *Craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadC
 			close(c)
 			return
 		default:
-			paintingInfo, err := getPaintingInfo(picUrl, loader, p.RootDir)
+			paintingInfo, err := p.getPaintingInfo(picUrl, p.RootDir)
 			if err != nil {
 				log.Errorf("get painting info from %s failed: %v", picUrl, err)
 			} else {
@@ -182,8 +177,11 @@ func (p *Craw) ProcessPage(allPicPageUrls []string, loader func(string) io.ReadC
 }
 
 // 下载单张
-func (p *Craw) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
-	html := getHtmlSourceCode(p.BeginURL.String(), loader)
+func (p *Craw) fetchSingle(beginUrl string, c chan *omohan.Info, s chan string) {
+	html, err := utils.GetUrlContent(p.Client, p.BeginURL.String())
+	if err != nil {
+		log.Panic(err)
+	}
 	// 获取作者
 	author := regexpFirstMatchGroup("<title>「[^」]+」/「([^」]+)」", html)
 	authorId := regexpFirstMatchGroup(`"authorId":"(\d+)"`, html)
@@ -197,20 +195,23 @@ func (p *Craw) fetchSingle(beginUrl string, loader func(string) io.ReadCloser, c
 	}
 	allPicPageUrls := make([]string, 0)
 	allPicPageUrls = append(allPicPageUrls, beginUrl)
-	p.ProcessPage(allPicPageUrls, loader, c, s)
+	p.ProcessPage(allPicPageUrls, c, s)
 }
 
 // 下载全部
-func (p *Craw) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string) {
-	html := getHtmlSourceCode(beginUrl, loader)
+func (p *Craw) fetchAll(beginUrl string, c chan *omohan.Info, s chan string) {
+	html, err := utils.GetUrlContent(p.Client, beginUrl)
 	// 获取作者
 	author := regexpFirstMatchGroup("<title>「([^」]+)」的作品", html)
 	// 获取用户 id
 	authorId := regexpFirstMatchGroup("id=(\\d+)", beginUrl)
 	// 获取所有图片 id
 	allPicAjaxUrl := fmt.Sprintf("https://www.pixiv.net/ajax/user/%s/profile/all", authorId)
-	allPicBody := loader(allPicAjaxUrl)
-	bytes, err := ioutil.ReadAll(allPicBody)
+	allPicBody, err := utils.GetUrlStream(p.Client, allPicAjaxUrl)
+	if err != nil {
+		log.Panic(err)
+	}
+	bytes, err := io.ReadAll(allPicBody)
 	if err != nil {
 		log.Panicf("can not found id by regex: id=(\\d+)")
 	}
@@ -251,7 +252,7 @@ func (p *Craw) fetchAll(beginUrl string, loader func(string) io.ReadCloser, c ch
 		picUrl := "https://www.pixiv.net/member_illust.php?mode=medium&illust_id=" + strconv.Itoa(value)
 		allPicPageUrls = append(allPicPageUrls, picUrl)
 	}
-	p.ProcessPage(allPicPageUrls, loader, c, s)
+	p.ProcessPage(allPicPageUrls, c, s)
 }
 
 func (p *Craw) processAuthorRename(id string) string {
@@ -268,7 +269,7 @@ func (p *Craw) processAuthorRename(id string) string {
 	return ""
 }
 
-func (p *Craw) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan *omohan.Info, s chan string, limit int, base string) {
+func (p *Craw) Baren(beginUrl string, c chan *omohan.Info, s chan string, limit int, base string) error {
 	// 判断是不是单张图片
 	u, err := url.Parse(beginUrl)
 	if err != nil {
@@ -280,10 +281,11 @@ func (p *Craw) Baren(beginUrl string, loader func(string) io.ReadCloser, c chan 
 	m, _ := url.ParseQuery(u.RawQuery)
 	if m.Get("mode") == "medium" && m.Get("illust_id") != "" {
 		log.Infof("fetch single", beginUrl)
-		p.fetchSingle(beginUrl, loader, c, s)
-		return
+		p.fetchSingle(beginUrl, c, s)
+		return nil
 	} else {
 		log.Infof("fetch all", beginUrl)
-		p.fetchAll(beginUrl, loader, c, s)
+		p.fetchAll(beginUrl, c, s)
 	}
+	return nil
 }

@@ -1,11 +1,10 @@
 package omohan
 
 import (
-	"io"
 	"net/http"
 )
 
 type Plugin interface {
-	InitCraw(client *http.Client) *Plugin
-	Baren(string, func(string) io.ReadCloser, chan *Info, chan string, int, string)
+	InitCraw(client *http.Client) (Plugin, error)
+	Baren(string, chan *Info, chan string, int, string) error
 }

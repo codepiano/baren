@@ -70,17 +70,6 @@ func initHttpClient() {
 	}
 }
 
-func loadUrl(url string) io.ReadCloser {
-	res, err := Client.Get(url)
-	if err != nil {
-		log.Panicf("get page: %v", err)
-	}
-	if res.StatusCode != 200 {
-		log.Panicf("status code error: %d %s", res.StatusCode, res.Status)
-	}
-	return res.Body
-}
-
 func loadPlugin(domain string, path string) interface{} {
 	log.Infof("load plugin %s.so from ./plugins/%s", path, domain)
 	p, err := plugin.Open("./plugins/" + domain + "/" + path + ".so")
@@ -158,7 +147,15 @@ func baren(url string, isLogin bool) {
 	signalChannel := make(chan string, 10)
 	defer close(signalChannel)
 	limit := viper.GetInt("limit")
-	go craw.Baren(url, loadUrl, resultChannel, signalChannel, limit, config["root-dir"])
+	root := config["root-dir"]
+	if root == "" {
+		root = viper.GetString("app.root-dir")
+		if root == "" {
+			log.Panicf("no root dir")
+		}
+		root = fmt.Sprintf("%s/%s", root, domain)
+	}
+	go craw.Baren(url, resultChannel, signalChannel, limit, config["root-dir"])
 	force := viper.GetBool("force")
 	for value := range resultChannel {
 		rootDir := config["root-dir"] + "/" + value.Dir + "/"
