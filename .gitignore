@@ -3,3 +3,4 @@ config.yaml
 app
 plugins/
 .idea/
+.DS_Store

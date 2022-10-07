@@ -155,7 +155,7 @@ func baren(url string, isLogin bool) {
 		}
 		root = fmt.Sprintf("%s/%s", root, domain)
 	}
-	go craw.Baren(url, resultChannel, signalChannel, limit, config["root-dir"])
+	go craw.Baren(url, resultChannel, signalChannel, limit, root)
 	force := viper.GetBool("force")
 	for value := range resultChannel {
 		rootDir := config["root-dir"] + "/" + value.Dir + "/"

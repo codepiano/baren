@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -111,6 +112,7 @@ type Info struct {
 }
 
 func (p *Craw) Baren(beginUrl string, c chan *omohan.Info, s chan string, limit int, base string) error {
+	p.RootDir = base
 	idMatch := videoIdRex.FindStringSubmatch(beginUrl)
 	if len(idMatch) != 2 {
 		log.Panicf("illgeal video url, no id matched")
@@ -134,38 +136,63 @@ func (p *Craw) Baren(beginUrl string, c chan *omohan.Info, s chan string, limit 
 	if vid == "" {
 		return errors.New("no video id")
 	}
-	info.Video1080, err = p.get1080URI(vid)
-	if err != nil {
-		return err
-	}
 	// 文件名
 	videoDesc := utils.RemoveIllegalFileNameChars(utils.CleanLabelText(videoItem.Desc))
 	if len(videoDesc) > 100 {
 		videoDesc = videoDesc[0:100]
 	}
-	fileName := fmt.Sprintf("%s_%s_1080p", time.UnixMilli(videoItem.CreateTime).Format(utils.TimeFormat), videoDesc)
+	fileName := fmt.Sprintf("%s_%s", time.UnixMilli(videoItem.CreateTime).Format(utils.TimeFormat), videoDesc)
+	author := videoItem.Author
+	if author == nil {
+		return errors.New("no author info")
+	}
+	dirName := fmt.Sprintf("%s_%s", author.UID, author.Nickname)
+	downloadDir := path.Join(p.RootDir, dirName)
+	var downloadLink *url.URL
 	// 先尝试下载 1080p 版，报 403，登录完再试试能不能下载
 	if p.Login && info.Video1080 != "" {
-		videoDownloadLink, err := url.Parse(info.Video1080)
-		if err != nil {
-			log.Errorf("illgeal link: %s", info.Video1080)
-			return errors.New("video link illegal")
-		}
-		request := &http.Request{
-			Method: http.MethodGet,
-			URL:    videoDownloadLink,
-			Header: utils.Header,
-		}
-		err = p.downloader.Download(request, "", fileName)
+		info.Video1080, err = p.get1080URI(vid)
 		if err != nil {
 			return err
 		}
-		return nil
+		downloadLink, err = url.Parse(info.Video1080)
+		if err != nil {
+			log.Errorf("illgeal link: %s", info.Video1080)
+		}
+		if downloadLink != nil {
+			fileName = fileName + "_1080p"
+		}
 	}
-	// 尝试下载无水印版视频
-	if videoItem.Video != nil && videoItem.Video.PlayAddr != nil &&
+	if downloadLink == nil && videoItem.Video != nil && videoItem.Video.PlayAddr != nil &&
 		len(videoItem.Video.PlayAddr.UrlList) > 0 {
+		// 1080p 地址未获取到，尝试下载无水印版视频
 		info.WaterMarkVideo = videoItem.Video.PlayAddr.UrlList[0]
+		noWaterMarkVideo := strings.Replace(info.WaterMarkVideo, "playwm", "play", 1)
+		noWaterMarkVideo, err = p.getRedirect(noWaterMarkVideo)
+		if err == nil && len(noWaterMarkVideo) > 0 {
+			downloadLink, err = url.Parse(noWaterMarkVideo)
+			if err != nil {
+				log.Errorf("illgeal no watermark link: %s", noWaterMarkVideo)
+			}
+		}
+		info.NoWaterMarkVideo = noWaterMarkVideo
+	}
+	if downloadLink == nil && info.WaterMarkVideo != "" {
+		// 尝试使用带水印的视频地址
+		downloadLink, err = url.Parse(info.WaterMarkVideo)
+		if err != nil {
+			log.Errorf("illgeal watermark link: %s", info.WaterMarkVideo)
+			return errors.New("no valid download link")
+		}
+	}
+	request := &http.Request{
+		Method: http.MethodGet,
+		URL:    downloadLink,
+		Header: utils.Header,
+	}
+	err = p.downloader.Download(request, downloadDir, fileName)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -179,6 +206,18 @@ func (p *Craw) get1080URI(vid string) (string, error) {
 	headers := resp.Header
 	if url, ok := headers["Location"]; ok {
 		return url[0], nil
+	}
+	return "", nil
+}
+
+func (p *Craw) getRedirect(url string) (string, error) {
+	resp, err := p.Client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	headers := resp.Header
+	if redirect, ok := headers["Location"]; ok {
+		return redirect[0], nil
 	}
 	return "", nil
 }
@@ -211,8 +250,10 @@ func (p *Craw) getDouyinVideoInfo(id string) (*VideoInfo, error) {
 }
 
 func main() {
+	client := &http.Client{}
 	c := &Craw{
-		Client: &http.Client{},
+		Client:     client,
+		downloader: &utils.Downloader{Client: client},
 	}
 	c.Baren("https://www.douyin.com/video/7149027119568342302", nil, nil, 0, "")
 }
